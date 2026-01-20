@@ -62,9 +62,9 @@ def send_initial_report():
     ai_prompt = f"""
     Analyze these supply chain conflicts: {json.dumps(current_conflicts)}
     
-    TASK: Create a MANDATORY initial executive report in the user's language.
-    1. Title: 📦 SUPPLY CHAIN RISK RANKING
-    2. Subtitle: EXECUTIVE REPORT: SUPPLY CHAIN CONFLICT ANALYSIS
+    TASK: Create a MANDATORY initial executive report in English.
+    1. Title: *SUPPLY CHAIN RISK RANKING*
+    2. Subtitle: *EXECUTIVE REPORT: SUPPLY CHAIN CONFLICT ANALYSIS*
     3. IMPACED CATEGORIES RANKING: Rank categories from HIGHEST to LOWEST risk based on the number of vessels.
     4. ANALYSIS OF RISK IMPACT: Explain the 7-14 day delay (customs/trucking) and the stockout gap.
     5. Formatting: Use BOLD for headers, NO '#' symbols.
@@ -86,16 +86,16 @@ def handle_interaction(message):
     
     ai_system_prompt = f"""
     You are an expert Supply Chain Consultant. 
-    CURRENT CONTEXT: {json.dumps(current_conflicts)}
+    CURRENT CONTEXT (The data from the Excel): {json.dumps(current_conflicts)}
     
-    LOGISTICS CONTEXT:
+    LOGISTICS RULES:
     - Critical delay (risk_score > 75) = 7-14 days total delay.
     - If the user asks for rankings or 'the second category', count the ships in the JSON context provided.
     
     INSTRUCTIONS:
     - Respond in the user's language.
     - Use professional Markdown (Bold for titles, no '#').
-    - If data is available, NEVER say 'I don't have data'. Use the context provided.
+    - USE THE PROVIDED CONTEXT to answer. Never say you don't have data.
     """
     
     try:
@@ -111,12 +111,10 @@ def handle_interaction(message):
         print(f"❌ AI Error: {e}")
 
 if __name__ == "__main__":
-    # 1. Kill potential ghost processes (Manual step: run 'pkill -f python' in terminal first)
-    
-    # 2. Trigger the report immediately on startup
+    # Ensure no other instances are running: pkill -f python
     try:
         send_initial_report()
-        print("📡 Bot is now INTERACTIVE and listening for follow-up questions...")
+        print("📡 Bridge Bot is now INTERACTIVE and ONLINE...")
         bot.infinity_polling()
     except Exception as e:
         print(f"❌ Startup Error: {e}")
