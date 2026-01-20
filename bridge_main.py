@@ -101,10 +101,13 @@ def run_bridge_engine():
         Analyze these multiple supply chain conflicts:
         {json.dumps(new_conflicts)}
         
-        Task: Create a 5-line executive summary in Spanish.
+        Task: Create a 5-line executive summary (in English by default unless the user writes in Spanish).
         - Mention the total number of ships and impacted categories.
         - Focus on the operational impact.
         - Provide one clear mitigation recommendation.
+        
+        Always respond in English for technical content and code. 
+        Maintain a professional tone focused on Data Analytics and Supply Chain logic.
         """
         
         response = client.chat.completions.create(
