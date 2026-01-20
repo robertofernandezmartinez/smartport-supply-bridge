@@ -74,16 +74,24 @@ def run_bridge_engine():
         
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
-        # Your specific requested prompt
+        # Prompt
         ai_prompt = f"""
         Analyze these supply chain conflicts: {json.dumps(new_conflicts)}
         
         Task: Create an executive report in English.
-        1. Rank the impacted categories from HIGHEST to LOWEST risk based on the number of vessels affected.
-        2. For each top category, explain that the 7-14 day delay (including customs/trucking) will cause a stockout gap.
-        3. Be conversational at the end: Ask the user if they want details on a specific category or ship. Respond in the same language used by the user.
-        """
         
+        FORMATTING RULES FOR TELEGRAM:
+        - Do NOT use '#' for headers. 
+        - Use BOLD text for titles and section headers (e.g., *SECTION TITLE*).
+        - Use bullet points for lists.
+        - Ensure the structure is clean and easy to read on a mobile screen.
+
+        CONTENT:
+        1. Rank the impacted categories from HIGHEST to LOWEST risk based on the number of vessels affected.
+        2. For each category, explain that the 7-14 day delay (including customs/trucking) will cause a stockout gap.
+        3. Be conversational at the end: Ask the user if they want details on a specific category or ship. Respond in the same language used by the user.
+        """      
+         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": ai_prompt}]
