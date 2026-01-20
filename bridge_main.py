@@ -13,7 +13,7 @@ load_dotenv()
 processed_updates = set()
 
 def get_bridge_data():
-    """Connects to Google Sheets and retrieves data from the three primary tabs."""
+    """Retrieves records from Google Sheets: risk_alerts, stockout_predictions, and supply_chain_map."""
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     google_json_str = os.getenv("GOOGLE_CREDENTIALS")
     spreadsheet_id = os.getenv("SPREADSHEET_ID")
@@ -24,20 +24,19 @@ def get_bridge_data():
         gc = gspread.authorize(creds)
         doc = gc.open_by_key(spreadsheet_id)
         
-        # Pulling data from the specific worksheets
         vessels = doc.worksheet("risk_alerts").get_all_records()
         predictions = doc.worksheet("stockout_predictions").get_all_records()
         mapping = doc.worksheet("supply_chain_map").get_all_records()
         
         return vessels, predictions, mapping
     except Exception as e:
-        print(f"❌ Database Access Error: {e}")
+        print(f"❌ Spreadsheet Connectivity Error: {e}")
         return [], [], []
 
 def identify_conflicts(vessels, predictions, mapping):
-    """Business logic to detect overlaps between maritime delays and inventory risk."""
+    """Business logic to cross-reference maritime delays with category stockout risks."""
     conflicts = []
-    # Filtering for risk_score > 75 (representing the 7-14 day logistical shift)
+    # Strategic threshold: risk_score > 75 implies a 7-14 day delay impact
     critical_vessels = [v for v in vessels if float(v.get('risk_score', 0)) > 75]
 
     for vessel in critical_vessels:
@@ -46,14 +45,13 @@ def identify_conflicts(vessels, predictions, mapping):
         
         if category:
             stock_risk = next((p for p in predictions if p['category'] == category), None)
-            # Match: Severe delay + Stockout predicted within 14 days
             if stock_risk and float(stock_risk.get('stockout_14d_pred', 0)) >= 1:
                 conflicts.append({"vessel": ship_id, "category": category})
     return conflicts
 
-# --- PROACTIVE RANKING BROADCAST ---
+# --- PROACTIVE BROADCAST LOGIC ---
 async def send_proactive_ranking(app_instance):
-    """Triggers the immediate executive report on startup or scheduled intervals."""
+    """Triggers the initial Supply Chain Ranking report on startup."""
     try:
         v, p, m = get_bridge_data()
         conflicts = identify_conflicts(v, p, m)
@@ -65,24 +63,24 @@ async def send_proactive_ranking(app_instance):
             prompt = (
                 f"Data Context: {json.dumps(conflicts)}\n\n"
                 "Task: Generate a 'SUPPLY CHAIN RISK RANKING' report in Spanish.\n"
-                "1. Rank categories by risk severity (ship volume).\n"
-                "2. Detail the impact of the 7-14 day delay on stock availability.\n"
-                "3. Format: Bold headers, no '#' characters, mobile-optimized."
+                "1. Rank categories by risk severity based on vessel count.\n"
+                "2. Explain how the 7-14 day delay breaches the 14-day stock window.\n"
+                "3. Format: Bold headers, no '#' characters. Executive tone."
             )
             
             completion = ai_client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "system", "content": "You are a Supply Chain Analyst."},
+                messages=[{"role": "system", "content": "You are a Logistics Strategy Consultant."},
                           {"role": "user", "content": prompt}]
             )
-            # Use app_instance.bot directly if calling manually, or context.bot if via JobQueue
-            target_bot = app_instance.bot if hasattr(app_instance, 'bot') else app_instance
-            await target_bot.send_message(chat_id=chat_id, text=completion.choices[0].message.content, parse_mode='Markdown')
-            print("✅ Initial analysis sent to Telegram.")
+            
+            # Use bot instance to send message
+            await app_instance.bot.send_message(chat_id=chat_id, text=completion.choices[0].message.content, parse_mode='Markdown')
+            print("✅ Executive Ranking sent to Telegram.")
     except Exception as e:
-        print(f"Broadcast Failure: {e}")
+        print(f"Broadcast Error: {e}")
 
-# --- INTERACTIVE AI ANALYST ---
+# --- INTERACTIVE QUERY HANDLER ---
 async def handle_bridge_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global processed_updates
     if not update.message or update.message.message_id in processed_updates:
@@ -95,10 +93,9 @@ async def handle_bridge_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
         system_instruction = (
-            "You are an interactive Supply Chain Strategist. Use the live dataset below.\n"
-            f"Dataset: {json.dumps(conflicts)}\n"
-            "Respond in the user's language. Be concise and professional.\n"
-            "Format: Use Bold for headers, avoid '#' symbols."
+            "You are an interactive Supply Chain Analyst. Use the following context.\n"
+            f"Context: {json.dumps(conflicts)}\n"
+            "Respond in the user's language. Use Bold for headers, avoid '#' symbols."
         )
         
         completion = ai_client.chat.completions.create(
@@ -108,26 +105,21 @@ async def handle_bridge_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         await update.message.reply_text(completion.choices[0].message.content, parse_mode='Markdown')
     except Exception as e:
-        print(f"Interaction Error: {e}")
+        print(f"Query Error: {e}")
 
 if __name__ == '__main__':
-    print("🚀 Initializing SmartPort-Bridge Deployment...")
+    print("🚀 Starting SmartPort-Bridge System...")
     token = os.getenv("TELEGRAM_TOKEN")
     
     if token:
         app = ApplicationBuilder().token(token.strip()).build()
         
-        # 1. MANUAL STARTUP TRIGGER: Ensures the bot 'wakes up' immediately
-        print("📊 Launching mandatory initial analysis...")
+        # 1. IMMEDIATE STARTUP REPORT
         loop = asyncio.get_event_loop()
         loop.run_until_complete(send_proactive_ranking(app))
         
-        # 2. JOB QUEUE: Set to repeat every hour (3600 seconds)
-        if app.job_queue:
-            app.job_queue.run_repeating(lambda ctx: send_proactive_ranking(ctx.bot), interval=3600)
-        
-        # 3. MESSAGE HANDLER: Listening for questions
+        # 2. INTERACTIVE MESSAGE LISTENER
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_bridge_query))
         
-        print("📡 Bot is ONLINE and interactive.")
+        print("📡 System Online. Listening for queries...")
         app.run_polling(drop_pending_updates=True)
