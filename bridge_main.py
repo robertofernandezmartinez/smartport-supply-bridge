@@ -8,24 +8,6 @@ import telebot
 # 1. Initialization
 load_dotenv()
 
-# Persistent memory to avoid duplicate alerts
-SENT_ALERTS_FILE = "sent_alerts.json"
-
-def load_sent_alerts():
-    """Loads the set of already processed alert IDs from a local JSON file."""
-    if os.path.exists(SENT_ALERTS_FILE):
-        with open(SENT_ALERTS_FILE, "r") as f:
-            try:
-                return set(json.load(f))
-            except json.JSONDecodeError:
-                return set()
-    return set()
-
-def save_sent_alerts(sent_set):
-    """Saves the updated set of processed alert IDs to a local JSON file."""
-    with open(SENT_ALERTS_FILE, "w") as f:
-        json.dump(list(sent_set), f)
-
 def get_data_from_sheet(sheet_name):
     """Accesses Google Sheets and retrieves data from a specific worksheet tab."""
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -54,10 +36,9 @@ def send_telegram_alert(message):
         print("❌ Error: Telegram configuration missing in .env")
 
 def run_bridge_engine():
-    """Main execution engine: identifies new conflicts and generates a multi-language AI summary."""
-    print("✅ System Online. Checking for NEW supply chain conflicts...")
+    """Main execution engine: identifies conflicts and generates a ranked AI summary."""
+    print("✅ System Online. Processing Supply Chain Analysis for Demo...")
     
-    sent_alerts = load_sent_alerts()
     vessels = get_data_from_sheet("risk_alerts")
     predictions = get_data_from_sheet("stockout_predictions")
     mapping = get_data_from_sheet("supply_chain_map")
@@ -66,9 +47,10 @@ def run_bridge_engine():
         print("❌ Critical data missing from Google Sheets. Operation aborted.")
         return
 
+    # In Demo Mode, we process all current conflicts to ensure Telegram alerts are triggered
     new_conflicts = []
     
-    # Logic: Risk Score > 75 represents a major logistical delay (7-10 days)
+    # Filter for high-risk vessels (Score > 75 or Status: Critical)
     critical_vessels = [
         v for v in vessels 
         if str(v.get('risk_level', '')).upper() == 'CRITICAL' 
@@ -81,20 +63,18 @@ def run_bridge_engine():
         
         if assigned_cat:
             stock_risk = next((p for p in predictions if p['category'] == assigned_cat), None)
-            alert_key = f"{v_id}_{assigned_cat}"
             
-            # Match: Significant delay + Predicted stockout in the 14-day window
+            # Condition: Delay impacting a category with a predicted stockout (value >= 1)
             if stock_risk and float(stock_risk.get('stockout_14d_pred', 0)) >= 1:
-                if alert_key not in sent_alerts:
-                    new_conflicts.append({"ship": v_id, "category": assigned_cat})
-                    sent_alerts.add(alert_key)
+                new_conflicts.append({"ship": v_id, "category": assigned_cat})
 
+    # Final Action: Generate a single AI report if conflicts are found
     if new_conflicts:
-        print(f"🚀 Found {len(new_conflicts)} new conflicts. Generating AI Summary...")
+        print(f"🚀 Found {len(new_conflicts)} conflicts. Requesting AI Executive Summary...")
         
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
-        # Enhanced Prompt: Multi-language detection and logistics context
+        # Your specific requested prompt
         ai_prompt = f"""
         Analyze these supply chain conflicts: {json.dumps(new_conflicts)}
         
@@ -109,13 +89,11 @@ def run_bridge_engine():
             messages=[{"role": "user", "content": ai_prompt}]
         )
         
-        report_msg = f"📦 *SUPPLY CHAIN CONSOLIDATED REPORT*\n\n{response.choices[0].message.content}"
+        report_msg = f"📦 *SUPPLY CHAIN RISK RANKING*\n\n{response.choices[0].message.content}"
         send_telegram_alert(report_msg)
-        
-        save_sent_alerts(sent_alerts)
-        print("✅ Consolidated alert dispatched.")
+        print("✅ Alert dispatched successfully.")
     else:
-        print("🟢 No new unique conflicts identified.")
+        print("🟢 No conflicts identified with current data criteria.")
 
 if __name__ == "__main__":
     try:
