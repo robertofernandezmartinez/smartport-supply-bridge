@@ -98,16 +98,10 @@ def run_bridge_engine():
         ai_prompt = f"""
         Analyze these supply chain conflicts: {json.dumps(new_conflicts)}
         
-        Context: 
-        - Maritime delay is estimated at 7-10 days.
-        - Processing (Customs + Distribution) adds 5 more days.
-        - Total delay exceeds the 14-day stockout safety window.
-
-        Task:
-        1. Write a 5-line executive report.
-        2. Detect the language used in the surroundings (default to English).
-        3. Explain why the stockout is inevitable due to the combined delay.
-        4. Suggest a mitigation strategy.
+        Task: Create an executive report in English.
+        1. Rank the impacted categories from HIGHEST to LOWEST risk based on the number of vessels affected.
+        2. For each top category, explain that the 7-14 day delay (including customs/trucking) will cause a stockout gap.
+        3. Be conversational at the end: Ask the user if they want details on a specific category or ship. Respond in the same language used by the user.
         """
         
         response = client.chat.completions.create(
