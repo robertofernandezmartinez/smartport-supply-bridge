@@ -2,7 +2,7 @@
 
 This project integrates maritime logistics data with warehouse inventory predictions. It serves as an automated decision-support system for supply chain managers.
 
-![](images/smartport-supply-image.png)
+![](images/smartport-supply-image-1.png)
 
 ## 🔗 Project Integration
 This repository acts as the central intelligence hub for:
