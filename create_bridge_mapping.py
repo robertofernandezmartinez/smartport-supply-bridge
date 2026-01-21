@@ -9,7 +9,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 load_dotenv()
 
 def generate_full_mapping():
-    """Reads all unique vessels and assigns them a category in the mapping tab."""
+    """Reads all unique vessels and assigns them a category from the REAL inventory list."""
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     google_json_str = os.getenv("GOOGLE_CREDENTIALS")
     spreadsheet_id = os.getenv("SPREADSHEET_ID")
@@ -20,31 +20,31 @@ def generate_full_mapping():
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(spreadsheet_id)
         
-        # Get all existing vessels from the risk_alerts tab
+        # 2. Get vessels from risk_alerts
         risk_sheet = sh.worksheet("risk_alerts")
         vessels_data = risk_sheet.get_all_records()
         
-        # Extract unique vessel names
-        unique_vessels = list(set([v.get('ship_name') or v.get('vessel_id') for v in vessels_data if v.get('ship_name') or v.get('vessel_id')]))
+        # We use vessel_id as the primary key based on your previous screenshots
+        unique_vessels = list(set([str(v.get('vessel_id')) for v in vessels_data if v.get('vessel_id') is not None]))
         
-        # Complete list of categories (Add as many as you need)
-        categories = ["Electronics", "Fashion", "Home Appliances", "Toys", "Automotive", "Food & Beverage", "Pharma"]
+        # 3. REAL CATEGORIES (Matches stockout_predictions exactly)
+        # Replacing "Fashion" with "Clothing" and adding "Furniture" and "Groceries"
+        real_categories = ["Clothing", "Electronics", "Furniture", "Groceries", "Toys"]
         
-        # Prepare data for the mapping tab
+        # 4. Prepare mapping data
         mapping_data = [["ship_name_raw", "assigned_category"]] # Headers
-        for ship in unique_vessels:
-            mapping_data.append([ship, random.choice(categories)])
+        for vessel_id in unique_vessels:
+            mapping_data.append([vessel_id, random.choice(real_categories)])
         
-        # Write to supply_chain_map tab
-        # Create the tab if it doesn't exist, or clear it if it does
+        # 5. Write to supply_chain_map
         try:
             map_sheet = sh.worksheet("supply_chain_map")
             map_sheet.clear()
-        except:
-            map_sheet = sh.add_worksheet(title="supply_chain_map", rows="100", cols="20")
+        except gspread.exceptions.WorksheetNotFound:
+            map_sheet = sh.add_worksheet(title="supply_chain_map", rows=str(len(unique_vessels) + 100), cols="5")
             
         map_sheet.update('A1', mapping_data)
-        print(f"✅ Mapping complete! {len(unique_vessels)} vessels mapped to categories.")
+        print(f"✅ Mapping updated! {len(unique_vessels)} vessels linked to REAL categories: {real_categories}")
         
     except Exception as e:
         print(f"❌ Error creating mapping: {e}")
