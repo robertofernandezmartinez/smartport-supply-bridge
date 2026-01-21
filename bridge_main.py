@@ -8,12 +8,12 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 from oauth2client.service_account import ServiceAccountCredentials
 
-# 1. Setup
+# 1. Initialization
 load_dotenv()
 processed_updates = set()
 
 def get_bridge_data():
-    """Retrieves records from Google Sheets using the exact tab names provided."""
+    """Accesses Sheets: risk_alerts, stockout_predictions, supply_chain_map."""
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     google_json_str = os.getenv("GOOGLE_CREDENTIALS")
     spreadsheet_id = os.getenv("SPREADSHEET_ID")
@@ -22,80 +22,88 @@ def get_bridge_data():
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         gc = gspread.authorize(creds)
         doc = gc.open_by_key(spreadsheet_id)
-        
-        # Exact tab names from your screenshot
-        vessels = doc.worksheet("risk_alerts").get_all_records()
-        predictions = doc.worksheet("stockout_predictions").get_all_records()
-        mapping = doc.worksheet("supply_chain_map").get_all_records()
-        return vessels, predictions, mapping
+        return (doc.worksheet("risk_alerts").get_all_records(), 
+                doc.worksheet("stockout_predictions").get_all_records(), 
+                doc.worksheet("supply_chain_map").get_all_records())
     except Exception as e:
-        print(f"❌ Spreadsheet Error: {e}")
+        print(f"❌ Connection Error: {e}")
         return [], [], []
 
 def identify_conflicts(vessels, predictions, mapping):
-    """Groups vessels by category using numeric IDs from the screenshots."""
+    """Business Logic: Cross-references numeric IDs with categories and stockout risk."""
     category_summary = {}
-    
-    # 1. Create mapping: ship_name_raw (ID) -> assigned_category
-    # We convert the key to string to avoid Number vs String conflicts
     vessel_to_cat = {str(m.get('ship_name_raw')): str(m.get('assigned_category')).strip() for m in mapping}
-    
-    # 2. Identify categories with stockout_14d_pred == 1
+    # Only categories with stockout_14d_pred == 1 are considered in conflict
     risky_cats = {str(p.get('category')).strip() for p in predictions if str(p.get('stockout_14d_pred')) == "1"}
 
     for v in vessels:
         try:
-            # Match only CRITICAL vessels (risk_score is 1.00 in your screenshot)
-            score = float(v.get('risk_score', 0))
-            if score >= 0.75: 
-                v_id = str(v.get('vessel_id')) # Getting the ID (0, 1, 2...)
+            if float(v.get('risk_score', 0)) >= 0.75: # Critical only
+                v_id = str(v.get('vessel_id'))
                 category = vessel_to_cat.get(v_id)
-                
                 if category and category in risky_cats:
                     category_summary[category] = category_summary.get(category, 0) + 1
-        except:
-            continue
+        except: continue
             
     conflicts = [{"category": cat, "total_vessels": count} for cat, count in category_summary.items()]
     return sorted(conflicts, key=lambda x: x['total_vessels'], reverse=True)
 
-async def send_mandatory_report(app):
-    """Generates the final report based on the ID-to-Category mapping."""
-    print("📊 Analyzing Supply Chain IDs...")
+# --- RECURSO: INFORME INICIAL (SIEMPRE EN INGLÉS) ---
+async def send_startup_report(app):
+    """Sends the default mandatory report in English on startup."""
     v, p, m = get_bridge_data()
     conflicts = identify_conflicts(v, p, m)
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     
-    if not conflicts:
-        # If no strict match, we list the categories found in the map to debug
-        print("⚠️ No matches. Ensuring IDs from risk_alerts exist in supply_chain_map.")
-        return
+    if conflicts and chat_id:
+        ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        prompt = (
+            f"Dataset: {json.dumps(conflicts)}\n\n"
+            "Task: Create a 'SUPPLY CHAIN RISK RANKING' report.\n"
+            "LANGUAGE: STRICTLY ENGLISH.\n"
+            "1. Title: 📦 SUPPLY CHAIN RISK RANKING\n"
+            "2. Rank all categories found, listing total vessels per category.\n"
+            "3. Explain the 7-14 day delay impact. Bold headers, no '#' symbols."
+        )
+        res = ai_client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": prompt}])
+        await app.bot.send_message(chat_id=chat_id, text=res.choices[0].message.content, parse_mode='Markdown')
 
+# --- RECURSO: CHAT INTERACTIVO (IDIOMA DINÁMICO) ---
+async def handle_interaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Responds to user queries in the user's language based on current data."""
+    global processed_updates
+    if not update.message or update.message.message_id in processed_updates: return
+    processed_updates.add(update.message.message_id)
+
+    v, p, m = get_bridge_data()
+    conflicts = identify_conflicts(v, p, m)
     ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    prompt = (
-        f"Dataset: {json.dumps(conflicts)}\n\n"
-        "Task: Create a 'SUPPLY CHAIN RISK RANKING' report in Spanish.\n"
-        "1. Title: 📦 SUPPLY CHAIN RISK RANKING\n"
-        "2. Subtitle: EXECUTIVE REPORT: CONFLICT ANALYSIS\n"
-        "3. Detail: Category ranking and 7-14 day delay impact.\n"
-        "4. Format: Bold headers, NO '#' symbols."
+    
+    # Instrucciones dinámicas para que no repita el informe si no se pide un ranking
+    system_prompt = (
+        f"You are a Supply Chain Analyst. Current Context: {json.dumps(conflicts)}. "
+        "INSTRUCTIONS:\n"
+        "1. Identify the user's language and respond in that same language.\n"
+        "2. If the user asks for a 'Top X', provide exactly that number of categories if available.\n"
+        "3. Be conversational. Do not just send a formal report unless requested.\n"
+        "4. Use bold for key figures. No '#' symbols."
     )
     
     response = ai_client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "system", "content": system_prompt},
+                  {"role": "user", "content": update.message.text}]
     )
-    
-    await app.bot.send_message(chat_id=chat_id, text=response.choices[0].message.content, parse_mode='Markdown')
-    print("✅ Executive report sent to Telegram.")
+    await update.message.reply_text(response.choices[0].message.content, parse_mode='Markdown')
 
 if __name__ == '__main__':
-    print("🚢 SmartPort-Bridge starting with Numeric ID support...")
+    print("🚢 SmartPort-Bridge Deployment - Online")
     token = os.getenv("TELEGRAM_TOKEN")
     if token:
         app = ApplicationBuilder().token(token.strip()).build()
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(send_mandatory_report(app))
-        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), 
-            lambda u, c: asyncio.create_task(send_mandatory_report(app))))
+        # Startup Report in English
+        loop.run_until_complete(send_startup_report(app))
+        
+        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_interaction))
         app.run_polling(drop_pending_updates=True)
