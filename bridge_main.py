@@ -31,44 +31,47 @@ def get_bridge_data():
         return [], [], []
 
 def identify_conflicts(vessels, predictions, mapping):
-    """Diagnostic logic: Shows exactly why matches are failing."""
+    """Ultra-robust logic to fix data mismatches and restore the 21:20 report."""
     category_summary = {}
     
-    # NORMALIZATION
-    vessel_map = {str(m['ship_name_raw']).strip().lower(): str(m['assigned_category']) for m in mapping}
-    risky_cats = {str(p['category']).strip().lower() for p in predictions if float(p.get('stockout_14d_pred', 0)) >= 1}
+    # 1. CLEAN MAPPING: Normalize ship names and categories
+    vessel_map = {
+        str(m.get('ship_name_raw', '')).strip().lower(): str(m.get('assigned_category', '')).strip() 
+        for m in mapping
+    }
+    
+    # 2. CLEAN PREDICTIONS: Find categories with risk >= 1
+    risky_cats = {
+        str(p.get('category', '')).strip().lower() 
+        for p in predictions if float(p.get('stockout_14d_pred', 0)) >= 1
+    }
 
-    # DIAGNOSTIC PRINTS (Check your terminal)
-    if mapping:
-        print(f"📋 Sample Mapping: {list(vessel_map.items())[:3]}")
-    if predictions:
-        print(f"📋 Sample Risky Categories: {list(risky_cats)[:3]}")
+    print(f"✅ Scanning {len(vessels)} vessels against {len(risky_cats)} risky categories...")
 
     for vessel in vessels:
         try:
+            # Threshold lowered to 10 for safety
             score = float(vessel.get('risk_score', 0))
             if score > 10: 
-                v_id_raw = str(vessel.get('vessel_id') or vessel.get('ship_name')).strip()
-                v_id = v_id_raw.lower()
+                # Normalize ship name from alerts
+                v_id = str(vessel.get('vessel_id') or vessel.get('ship_name', '')).strip().lower()
                 category = vessel_map.get(v_id)
                 
                 if category:
-                    cat_lower = category.strip().lower()
-                    if cat_lower in risky_cats:
+                    # Check if this category is in our risky list
+                    if category.lower() in risky_cats:
                         category_summary[category] = category_summary.get(category, 0) + 1
-                    else:
-                        # This explains why a ship is found but not reported
-                        if v_id == list(vessel_map.keys())[0]: # Print only first one to avoid spam
-                            print(f"⚠️ Category '{category}' for ship '{v_id_raw}' NOT found in risky_cats.")
-                else:
-                    if v_id == list(vessel_map.keys())[0]:
-                        print(f"⚠️ Ship '{v_id_raw}' NOT found in supply_chain_map.")
-        except:
+        except Exception as e:
             continue
             
     conflicts = [{"category": cat, "total_vessels": count} for cat, count in category_summary.items()]
+    
+    # SORTING: Ensure Toys and Electronics are at the top if they have more ships
+    conflicts = sorted(conflicts, key=lambda x: x['total_vessels'], reverse=True)
+    
+    print(f"🔍 Found {len(conflicts)} categories with real conflicts.")
     return conflicts
-
+    
 async def send_mandatory_report(app):
     """Generates the required Executive Report with real data."""
     print("📊 Generating analysis...")
